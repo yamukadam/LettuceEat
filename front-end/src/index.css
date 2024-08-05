@@ -1,0 +1,14 @@
+*{
+  padding: 0;
+  margin: 0;
+  box-sizing: 0;
+}
+body{
+  min-height: 100 vh;
+
+}
+
+a{
+  text-decoration: none;
+  color: inherit;
+}
