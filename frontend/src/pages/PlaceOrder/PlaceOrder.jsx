@@ -1,131 +1,170 @@
-import React, { useContext, useEffect, useState } from 'react'
-import './PlaceOrder.css'
-import { StoreContext } from '../../Context/StoreContext'
-import { assets } from '../../assets/assets';
+import React, { useContext, useEffect, useState } from 'react';
+import './PlaceOrder.css';
+import { StoreContext } from '../../Context/StoreContext';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'react-toastify';
 import axios from 'axios';
+import { CardElement, useStripe, useElements } from '@stripe/react-stripe-js';
+import {assets} from '../../assets/assets';
+
 
 const PlaceOrder = () => {
+  const [payment, setPayment] = useState('cod');
+  const [data, setData] = useState({
+    firstName: '',
+    lastName: '',
+    email: '',
+    street: '',
+    city: '',
+    state: '',
+    zipcode: '',
+    country: '',
+    phone: '',
+  });
 
-    const [payment, setPayment] = useState("cod")
-    const [data, setData] = useState({
-        firstName: "",
-        lastName: "",
-        email: "",
-        street: "",
-        city: "",
-        state: "",
-        zipcode: "",
-        country: "",
-        phone: ""
-    })
+  const {
+    getTotalCartAmount,
+    token,
+    food_list,
+    cartItems,
+    url,
+    setCartItems,
+    currency,
+    deliveryCharge,
+  } = useContext(StoreContext);
 
-    const { getTotalCartAmount, token, food_list, cartItems, url, setCartItems,currency,deliveryCharge } = useContext(StoreContext);
+  const navigate = useNavigate();
 
-    const navigate = useNavigate();
+  const stripe = useStripe();
+  const elements = useElements();
 
-    const onChangeHandler = (event) => {
-        const name = event.target.name
-        const value = event.target.value
-        setData(data => ({ ...data, [name]: value }))
+  const onChangeHandler = (event) => {
+    const name = event.target.name;
+    const value = event.target.value;
+    setData((data) => ({ ...data, [name]: value }));
+  };
+
+  // PlaceOrder.jsx
+
+const placeOrder = async (e) => {
+  e.preventDefault();
+
+  let orderData = {
+    address: data,
+    // No need to send items, the backend will fetch from cartData
+  };
+
+  try {
+    if (payment === 'stripe') {
+      console.log('Placing order with Stripe:', orderData);
+      let response = await axios.post(`${url}/api/order/placeOrder`, orderData, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      console.log('Response from /placeOrder:', response.data);
+
+      if (response.data.success) {
+        const { clientSecrets } = response.data;
+
+        for (const clientSecret of clientSecrets) {
+          const result = await stripe.confirmCardPayment(clientSecret, {
+            payment_method: {
+              card: elements.getElement(CardElement),
+              billing_details: {
+                name: `${data.firstName} ${data.lastName}`,
+                email: data.email,
+                address: {
+                  line1: data.street,
+                  city: data.city,
+                  state: data.state,
+                  postal_code: data.zipcode,
+                  country: data.country,
+                },
+              },
+            },
+          });
+
+          if (result.error) {
+            console.error('Stripe payment error:', result.error.message);
+            toast.error(result.error.message);
+            return;
+          } else if (result.paymentIntent.status === 'succeeded') {
+            console.log('Payment succeeded for one seller!');
+          }
+        }
+
+        toast.success('Order placed successfully!');
+        setCartItems({});
+        navigate('/myorders');
+      } else {
+        console.error('Error from /placeOrder:', response.data.message);
+        toast.error(response.data.message);
+      }
+    } else {
+      console.log('Placing order with COD:', orderData);
+      let response = await axios.post(`${url}/api/order/placeOrderCod`, orderData, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      console.log('Response from /placeOrderCod:', response.data);
+
+      if (response.data.success) {
+        toast.success(response.data.message);
+        setCartItems({});
+        navigate('/myorders');
+      } else {
+        console.error('Error from /placeOrderCod:', response.data.message);
+        toast.error(response.data.message);
+      }
     }
+  } catch (error) {
+    console.error('Error placing order:', error);
+    const errorMessage = error.response?.data?.message || 'Something went wrong while placing the order.';
+    toast.error(errorMessage);
+  }
+};
 
-    const placeOrder = async (e) => {
-        e.preventDefault()
-        let orderItems = [];
-        food_list.map(((item) => {
-            if (cartItems[item._id] > 0) {
-                let itemInfo = item;
-                itemInfo["quantity"] = cartItems[item._id];
-                orderItems.push(itemInfo)
-            }
-        }))
-        let orderData = {
-            address: data,
-            items: orderItems,
-            amount: getTotalCartAmount() + deliveryCharge,
-        }
-        if (payment === "stripe") {
-            let response = await axios.post(url + "/api/order/place", orderData, {headers: {'Authorization': `Bearer ${token}`}});
-            if (response.data.success) {
-                const { session_url } = response.data;
-                window.location.replace(session_url);
-            }
-            else {
-                toast.error("Something Went Wrong")
-            }
-        }
-        else{
-            let response = await axios.post(url + "/api/order/placecod", orderData, {headers: {'Authorization': `Bearer ${token}`}});
-            if (response.data.success) {
-                navigate("/myorders")
-                toast.success(response.data.message)
-                setCartItems({});
-            }
-            else {
-                toast.error("Something Went Wrong")
-            }
-        }
+  
 
+  useEffect(() => {
+    if (!token) {
+      toast.error('To place an order, please sign in first.');
+      navigate('/cart');
+    } else if (getTotalCartAmount() === 0) {
+      navigate('/cart');
     }
+  }, [token]);
 
-    useEffect(() => {
-        if (!token) {
-            toast.error("to place an order sign in first")
-            navigate('/cart')
-        }
-        else if (getTotalCartAmount() === 0) {
-            navigate('/cart')
-        }
-    }, [token])
-
-    return (
-        <form onSubmit={placeOrder} className='place-order'>
-            <div className="place-order-left">
-                <p className='title'>Delivery Information</p>
-                <div className="multi-field">
-                    <input type="text" name='firstName' onChange={onChangeHandler} value={data.firstName} placeholder='First name' required />
-                    <input type="text" name='lastName' onChange={onChangeHandler} value={data.lastName} placeholder='Last name' required />
-                </div>
-                <input type="email" name='email' onChange={onChangeHandler} value={data.email} placeholder='Email address' required />
-                <input type="text" name='street' onChange={onChangeHandler} value={data.street} placeholder='Street' required />
-                <div className="multi-field">
-                    <input type="text" name='city' onChange={onChangeHandler} value={data.city} placeholder='City' required />
-                    <input type="text" name='state' onChange={onChangeHandler} value={data.state} placeholder='State' required />
-                </div>
-                <div className="multi-field">
-                    <input type="text" name='zipcode' onChange={onChangeHandler} value={data.zipcode} placeholder='Zip code' required />
-                    <input type="text" name='country' onChange={onChangeHandler} value={data.country} placeholder='Country' required />
-                </div>
-                <input type="text" name='phone' onChange={onChangeHandler} value={data.phone} placeholder='Phone' required />
+  return (
+    <form onSubmit={placeOrder} className='place-order'>
+      {/* ... existing form fields ... */}
+      <div className='place-order-right'>
+        <div className='cart-total'>
+          {/* ... cart totals ... */}
+        </div>
+        <div className='payment'>
+          <h2>Payment Method</h2>
+          <div onClick={() => setPayment('cod')} className='payment-option'>
+            <img src={payment === 'cod' ? assets.checked : assets.un_checked} alt='' />
+            <p>COD ( Cash on delivery )</p>
+          </div>
+          <div onClick={() => setPayment('stripe')} className='payment-option'>
+            <img src={payment === 'stripe' ? assets.checked : assets.un_checked} alt='' />
+            <p>Stripe ( Credit / Debit )</p>
+          </div>
+          {payment === 'stripe' && (
+            <div className='card-element'>
+              <CardElement options={{ hidePostalCode: true }} />
             </div>
-            <div className="place-order-right">
-                <div className="cart-total">
-                    <h2>Cart Totals</h2>
-                    <div>
-                        <div className="cart-total-details"><p>Subtotal</p><p>{currency}{getTotalCartAmount()}</p></div>
-                        <hr />
-                        <div className="cart-total-details"><p>Delivery Fee</p><p>{currency}{getTotalCartAmount() === 0 ? 0 : deliveryCharge}</p></div>
-                        <hr />
-                        <div className="cart-total-details"><b>Total</b><b>{currency}{getTotalCartAmount() === 0 ? 0 : getTotalCartAmount() + deliveryCharge}</b></div>
-                    </div>
-                </div>
-                <div className="payment">
-                    <h2>Payment Method</h2>
-                    <div onClick={() => setPayment("cod")} className="payment-option">
-                        <img src={payment === "cod" ? assets.checked : assets.un_checked} alt="" />
-                        <p>COD ( Cash on delivery )</p>
-                    </div>
-                    <div onClick={() => setPayment("stripe")} className="payment-option">
-                        <img src={payment === "stripe" ? assets.checked : assets.un_checked} alt="" />
-                        <p>Stripe ( Credit / Debit )</p>
-                    </div>
-                </div>
-                <button className='place-order-submit' type='submit'>{payment==="cod"?"Place Order":"Proceed To Payment"}</button>
-            </div>
-        </form>
-    )
-}
+          )}
+        </div>
+        <button className='place-order-submit' type='submit'>
+          {payment === 'cod' ? 'Place Order' : 'Proceed To Payment'}
+        </button>
+      </div>
+    </form>
+  );
+};
 
-export default PlaceOrder
+export default PlaceOrder;
+

@@ -3,6 +3,10 @@ import { food_list, menu_list } from "../assets/assets";
 import axios from "axios";
 export const StoreContext = createContext(null);
 
+import { loadStripe } from '@stripe/stripe-js';
+
+export const stripePromise = loadStripe('pk_test_51PuShVRwGMPa80C8wWlpFqLKnFJdsmev986nfZfINm4EmG6MfFS8yBsNLsTK1sfcRZ8hex1C0T6pLgD1iRWCU1nk00Ex9WD1YR');
+
 const StoreContextProvider = (props) => {
 
 

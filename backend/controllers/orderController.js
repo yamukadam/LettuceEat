@@ -10,76 +10,159 @@ const deliveryCharge = 5;
 const frontend_URL = 'http://localhost:5173';
 
 // Placing User Order for Frontend using stripe
+// orderController.js
 const placeOrder = async (req, res) => {
+  try {
+    const userId = req.user.id;  // Retrieve user ID from authenticated user
+    console.log('User ID:', userId);
 
-    try {
-        const newOrder = new orderModel({
-            userId: req.body.userId,
-            items: req.body.items,
-            amount: req.body.amount,
-            address: req.body.address,
-        })
-        await newOrder.save();
-        await userModel.findByIdAndUpdate(req.body.userId, { cartData: {} });
-
-        const line_items = req.body.items.map((item) => ({
-            price_data: {
-                currency: currency,
-                product_data: {
-                    name: item.name
-                },
-                unit_amount: item.price * 100 
-            },
-            quantity: item.quantity
-        }))
-
-        line_items.push({
-            price_data: {
-                currency: currency,
-                product_data: {
-                    name: "Delivery Charge"
-                },
-                unit_amount: deliveryCharge * 100
-            },
-            quantity: 1
-        })
-
-        const session = await stripe.checkout.sessions.create({
-            success_url: `${frontend_URL}/verify?success=true&orderId=${newOrder._id}`,
-            cancel_url: `${frontend_URL}/verify?success=false&orderId=${newOrder._id}`,
-            line_items: line_items,
-            mode: 'payment',
-        });
-
-        res.json({ success: true, session_url: session.url });
-
-    } catch (error) {
-        console.log(error);
-        res.json({ success: false, message: "Error" })
+    if (!userId) {
+      throw new Error('User ID is undefined');
     }
-}
+
+    const user = await userModel.findById(userId);
+    if (!user) {
+      throw new Error(`User not found with ID ${userId}`);
+    }
+
+    const cartData = user.cartData;
+
+    if (!cartData || Object.keys(cartData).length === 0) {
+      return res.status(400).json({ success: false, message: 'Cart is empty' });
+    }
+
+    // Fetch items and include seller information
+    const items = await Promise.all(
+      Object.keys(cartData).map(async (itemId) => {
+        const product = await foodModel.findById(itemId);
+        if (!product) {
+          throw new Error(`Product not found with ID ${itemId}`);
+        }
+        return {
+          productId: product._id,
+          quantity: cartData[itemId],
+          price: product.price,
+          sellerId: product.owner, // Assuming 'owner' is the seller's user ID
+          name: product.name,
+        };
+      })
+    );
+
+    // Group items by seller
+    const itemsBySeller = items.reduce((acc, item) => {
+      if (!acc[item.sellerId]) acc[item.sellerId] = [];
+      acc[item.sellerId].push(item);
+      return acc;
+    }, {});
+
+    const orderIds = [];
+    const clientSecrets = [];
+
+    for (const sellerId in itemsBySeller) {
+      const sellerItems = itemsBySeller[sellerId];
+      const amount = sellerItems.reduce((total, item) => total + item.price * item.quantity, 0);
+    console.log(req.body)
+
+      const newOrder = new orderModel({
+        userId,
+        items: sellerItems,
+        amount,
+        address: req.body.address,
+      });
+      await newOrder.save();
+      orderIds.push(newOrder._id);
+
+      const seller = await userModel.findById(sellerId);
+
+      if (!seller || !seller.stripeAccountId) {
+        return res.status(400).json({ success: false, message: 'Seller is not connected to Stripe' });
+      }
+
+      console.log('reached here')
+      console.error('reached here')
+
+
+      const paymentIntent = await stripe.paymentIntents.create({
+        amount: amount * 100, // Convert to cents
+        currency: 'usd',
+        payment_method_types: ['card'],
+        application_fee_amount: calculateApplicationFee(amount * 100),
+        transfer_data: {
+          destination: seller.stripeAccountId,
+        },
+        metadata: {
+          orderId: newOrder._id.toString(),
+        },
+      });
+
+      clientSecrets.push(paymentIntent.client_secret);
+    }
+
+    // Clear the user's cart
+    await userModel.findByIdAndUpdate(userId, { cartData: {} });
+
+    res.json({
+      success: true,
+      clientSecrets,
+      orderIds,
+    });
+  } catch (error) {
+    console.error('Error in placeOrder:', error);
+    res.status(500).json({ success: false, message: 'Error placing order', error: error.message });
+  }
+};
+
+  
 
 // Placing User Order for Frontend using stripe
 const placeOrderCod = async (req, res) => {
+  try {
+    const userId = req.user.id; // Retrieve user ID from authenticated user
+    const user = await userModel.findById(userId);
+    const cartData = user.cartData;
 
-    try {
-        const newOrder = new orderModel({
-            userId: req.body.userId,
-            items: req.body.items,
-            amount: req.body.amount,
-            address: req.body.address,
-            payment: true,
-        })
-        await newOrder.save();
-        await userModel.findByIdAndUpdate(req.body.userId, { cartData: {} });
-
-        res.json({ success: true, message: "Order Placed" });
-
-    } catch (error) {
-        console.log(error);
-        res.json({ success: false, message: "Error" })
+    if (!cartData || Object.keys(cartData).length === 0) {
+      return res.status(400).json({ success: false, message: 'Cart is empty' });
     }
-}
+
+    const items = await Promise.all(
+      Object.keys(cartData).map(async (itemId) => {
+        const product = await foodModel.findById(itemId);
+        if (!product) {
+          throw new Error(`Product not found with ID ${itemId}`);
+        }
+        return {
+          productId: product._id,
+          quantity: cartData[itemId],
+          price: product.price,
+          sellerId: product.owner,
+          name: product.name,
+        };
+      })
+    );
+
+    const amount = items.reduce((total, item) => total + item.price * item.quantity, 0);
+
+    const newOrder = new orderModel({
+      userId,
+      items,
+      amount,
+      address: req.body.address,
+      payment: false,
+    });
+    await newOrder.save();
+
+    // Clear the user's cart
+    await userModel.findByIdAndUpdate(userId, { cartData: {} });
+
+    res.json({ success: true, message: 'Order Placed' });
+  } catch (error) {
+    console.error('Error in placeOrderCod:', error);
+    res.status(500).json({ success: false, message: 'Error placing order', error: error.message });
+  }
+};
+
+  
 
 // Listing Order for Admin panel
 const listOrders = async (req, res) => {

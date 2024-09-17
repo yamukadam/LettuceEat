@@ -11,6 +11,8 @@ import Orders from './pages/Orders/Orders'
 import LoginPopup from './components/LoginPopup/LoginPopup'
 import PlaceOrder from './pages/PlaceOrder/PlaceOrder'
 import MyOrders from './pages/MyOrders/MyOrders'
+import SellerDashboard from './pages/SellerDashboard/SellerDashboard'
+import StripeReturn from './pages/StripeReturn/StripeReturn'
 import { ToastContainer } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
 import Verify from './pages/Verify/Verify'
@@ -35,6 +37,8 @@ const App = () => {
           <Route path='/order' element={<PlaceOrder />}/>
           <Route path='/myorders' element={<MyOrders />}/>
           <Route path='/verify' element={<Verify />}/>
+          <Route path='/seller-dashboard' element={<SellerDashboard />} />
+          <Route path="/stripe-return" element={<StripeReturn />} />
         </Routes>
       </div>
       <Footer />
